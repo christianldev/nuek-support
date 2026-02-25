@@ -22,8 +22,24 @@ axiosInstance.interceptors.request.use(
 
 axiosInstance.interceptors.response.use(
 	(res: AxiosResponse<Result<any>>) => {
-		if (!res.data) throw new Error(t("sys.api.apiRequestFailed"));
-		const { status, data, message } = res.data;
+		if (!res.data) {
+			// Log full response for debugging when backend returns no JSON body
+			// (helps diagnose CORS, proxy or server errors during development)
+			// eslint-disable-next-line no-console
+			console.error("apiClient: empty response:", res);
+			throw new Error(`${t("sys.api.apiRequestFailed")} (status: ${res.status})`);
+		}
+
+		// If backend returns a raw auth/token object (not wrapped in Result<>)
+		// return it directly so endpoints like /auth/local/login work.
+		if (
+			typeof res.data === "object" &&
+			("accessToken" in res.data || "refreshToken" in res.data || "user" in res.data)
+		) {
+			return res.data as any;
+		}
+
+		const { status, data, message } = res.data as any;
 		if (status === ResultStatus.SUCCESS) {
 			return data;
 		}

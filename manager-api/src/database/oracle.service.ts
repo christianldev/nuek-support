@@ -14,10 +14,12 @@ export class OracleService {
       );
     }
 
+    const normalizedConnectString = connectString.replace(/localhost/gi, '127.0.0.1');
+
     return oracledb.getConnection({
       user,
       password,
-      connectString,
+      connectString: normalizedConnectString,
     });
   }
 }
