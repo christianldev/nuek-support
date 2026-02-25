@@ -31,6 +31,43 @@
 $ npm install
 ```
 
+## Microsoft 365 authentication (Office 365)
+
+This API now includes login with Microsoft Entra ID (Azure AD) using OAuth2/OpenID Connect and session-based auth.
+
+### 1) Configure environment variables
+
+Create a `.env` file in `manager-api` with:
+
+```env
+PORT=3000
+NODE_ENV=development
+
+SESSION_SECRET=replace-with-a-long-random-secret
+CLIENT_ORIGIN=http://localhost:5173
+
+AZURE_AD_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+AZURE_AD_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+AZURE_AD_CLIENT_SECRET=your-client-secret
+AZURE_AD_CALLBACK_URL=http://localhost:3000/auth/microsoft/callback
+
+AUTH_SUCCESS_REDIRECT=http://localhost:5173
+```
+
+### 2) Entra ID app registration
+
+- Register an app in Microsoft Entra ID.
+- Add a **Web** redirect URI: `http://localhost:3000/auth/microsoft/callback`.
+- Create a client secret and copy it into `AZURE_AD_CLIENT_SECRET`.
+- Ensure account type and tenant match your corporate setup.
+
+### 3) Auth endpoints
+
+- `GET /auth/microsoft` → starts Microsoft login.
+- `GET /auth/microsoft/callback` → callback from Microsoft.
+- `GET /auth/profile` → returns authenticated user profile.
+- `POST /auth/logout` → ends session.
+
 ## Compile and run the project
 
 ```bash
