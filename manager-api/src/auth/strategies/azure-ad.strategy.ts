@@ -12,10 +12,10 @@ export class AzureAdStrategy extends PassportStrategy(
   private readonly isConfigured: boolean;
 
   constructor(private readonly authService: AuthService) {
-    const tenantId = process.env.AZURE_AD_TENANT_ID;
-    const clientId = process.env.AZURE_AD_CLIENT_ID;
-    const clientSecret = process.env.AZURE_AD_CLIENT_SECRET;
-    const callbackUrl = process.env.AZURE_AD_CALLBACK_URL;
+    const tenantId = process.env.AZURE_AD_TENANT_ID?.trim();
+    const clientId = process.env.AZURE_AD_CLIENT_ID?.trim();
+    const clientSecret = process.env.AZURE_AD_CLIENT_SECRET?.trim();
+    const callbackUrl = process.env.AZURE_AD_CALLBACK_URL?.trim();
     const hasRequiredConfig =
       Boolean(tenantId) &&
       Boolean(clientId) &&
@@ -23,13 +23,13 @@ export class AzureAdStrategy extends PassportStrategy(
       Boolean(callbackUrl);
 
     super({
-      identityMetadata: `https://login.microsoftonline.com/${tenantId ?? 'common'}/v2.0/.well-known/openid-configuration`,
-      clientID: clientId ?? 'missing-client-id',
-      clientSecret: clientSecret ?? 'missing-client-secret',
+      identityMetadata: `https://login.microsoftonline.com/${tenantId || 'common'}/v2.0/.well-known/openid-configuration`,
+      clientID: clientId || 'missing-client-id',
+      clientSecret: clientSecret || 'missing-client-secret',
       responseType: 'code',
       responseMode: 'query',
       redirectUrl:
-        callbackUrl ?? 'http://localhost:3000/auth/microsoft/callback',
+        callbackUrl || 'http://localhost:3000/auth/microsoft/callback',
       allowHttpForRedirectUrl: process.env.NODE_ENV !== 'production',
       scope: ['openid', 'profile', 'email', 'offline_access', 'User.Read'],
       validateIssuer: hasRequiredConfig,

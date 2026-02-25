@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Post,
@@ -11,15 +12,19 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { AuthenticatedGuard } from './guards/authenticated.guard';
+import { LocalAuthService } from './local/local-auth.service';
+import { LocalJwtGuard } from './local/local-jwt.guard';
 
 @Controller('auth')
 export class AuthController {
+  constructor(private readonly localAuthService: LocalAuthService) {}
+
   private isMicrosoftAuthConfigured(): boolean {
     return Boolean(
       process.env.AZURE_AD_TENANT_ID &&
-        process.env.AZURE_AD_CLIENT_ID &&
-        process.env.AZURE_AD_CLIENT_SECRET &&
-        process.env.AZURE_AD_CALLBACK_URL,
+      process.env.AZURE_AD_CLIENT_ID &&
+      process.env.AZURE_AD_CLIENT_SECRET &&
+      process.env.AZURE_AD_CALLBACK_URL,
     );
   }
 
@@ -33,6 +38,29 @@ export class AuthController {
     }
 
     return;
+  }
+
+  @Post('local/login')
+  async localLogin(@Body() body: { username?: string; password?: string }) {
+    return this.localAuthService.login(
+      body.username ?? '',
+      body.password ?? '',
+    );
+  }
+
+  @Post('local/refresh')
+  async localRefresh(@Body() body: { refreshToken?: string }) {
+    if (!body.refreshToken) {
+      throw new UnauthorizedException('refreshToken is required');
+    }
+
+    return this.localAuthService.refresh(body.refreshToken);
+  }
+
+  @Get('local/profile')
+  @UseGuards(LocalJwtGuard)
+  localProfile(@Req() request: Request) {
+    return (request as Request & { user?: unknown }).user ?? null;
   }
 
   @Get('microsoft/callback')

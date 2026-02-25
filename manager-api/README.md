@@ -68,6 +68,37 @@ AUTH_SUCCESS_REDIRECT=http://localhost:5173
 - `GET /auth/profile` → returns authenticated user profile.
 - `POST /auth/logout` → ends session.
 
+## Local authentication with Oracle (in parallel with Microsoft)
+
+You can authenticate with your own Oracle table without removing Microsoft auth.
+
+### Required env vars
+
+```env
+ORACLE_DB_USER=
+ORACLE_DB_PASSWORD=
+ORACLE_DB_CONNECT_STRING=localhost:1521/XEPDB1
+
+ORACLE_AUTH_TABLE=SGDT947
+ORACLE_AUTH_USERNAME_COLUMN=USUARIO
+ORACLE_AUTH_PASSWORD_COLUMN=PASSWORD
+ORACLE_AUTH_PASSWORD_ALGORITHM=sha256
+ORACLE_AUTH_SHA256_TRANSFORM=trim-upper
+ORACLE_AUTH_SHA256_ENABLE_FALLBACKS=true
+ORACLE_AUTH_PASSWORD_HASHED=false
+
+JWT_ACCESS_SECRET=change-access-secret
+JWT_REFRESH_SECRET=change-refresh-secret
+JWT_ACCESS_EXPIRES_IN=900
+JWT_REFRESH_EXPIRES_IN=604800
+```
+
+### Local auth endpoints
+
+- `POST /auth/local/login` with `{ "username": "...", "password": "..." }`
+- `POST /auth/local/refresh` with `{ "refreshToken": "..." }`
+- `GET /auth/local/profile` with `Authorization: Bearer <accessToken>`
+
 ## Compile and run the project
 
 ```bash
