@@ -3,6 +3,8 @@ import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel } from "@/ui/form";
 import { Input } from "@/ui/input";
+import apiClient from "@/api/apiClient";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import { Switch } from "@/ui/switch";
 import { Textarea } from "@/ui/textarea";
 import { faker } from "@faker-js/faker";
@@ -10,13 +12,14 @@ import type { EventInput } from "@fullcalendar/core";
 import { zodResolver } from "@hookform/resolvers/zod";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 export type CalendarEventFormFieldType = Pick<EventInput, "title" | "allDay" | "color"> & {
 	id: string;
 	description?: string;
+	spotId?: string;
 	start?: Dayjs;
 	end?: Dayjs;
 };
@@ -36,6 +39,7 @@ const COLORS = ["#00a76f", "#8e33ff", "#00b8d9", "#003768", "#22c55e", "#ffab00"
 const formSchema = z.object({
 	title: z.string().min(1, "Title is required"),
 	description: z.string().optional(),
+	spotId: z.string().min(1, "Spot ID is required"),
 	allDay: z.boolean(),
 	start: z.date(),
 	end: z.date(),
@@ -59,6 +63,7 @@ export default function CalendarEventForm({
 		defaultValues: {
 			title: initValues.title || "",
 			description: initValues.description || "",
+			spotId: initValues.spotId || "",
 			allDay: initValues.allDay || false,
 			start: initValues.start?.toDate() || new Date(),
 			end: initValues.end?.toDate() || new Date(),
@@ -66,11 +71,14 @@ export default function CalendarEventForm({
 		},
 	});
 
+	const [spots, setSpots] = useState<{ id: string; name?: string }[]>([]);
+
 	useEffect(() => {
 		if (open) {
 			form.reset({
 				title: initValues.title || "",
 				description: initValues.description || "",
+				spotId: initValues.spotId || "",
 				allDay: initValues.allDay || false,
 				start: initValues.start?.toDate() || new Date(),
 				end: initValues.end?.toDate() || new Date(),
@@ -78,6 +86,14 @@ export default function CalendarEventForm({
 			});
 		}
 	}, [initValues, form, open]);
+
+	useEffect(() => {
+		if (!open) return;
+		apiClient
+			.get({ url: '/parking/spots' })
+			.then((res: any) => setSpots(res || []))
+			.catch(() => setSpots([]));
+	}, [open]);
 
 	const handleSubmit = (values: FormValues) => {
 		const { id } = initValues;
@@ -120,6 +136,34 @@ export default function CalendarEventForm({
 									<FormLabel>Description</FormLabel>
 									<FormControl>
 										<Textarea {...field} />
+									</FormControl>
+								</FormItem>
+							)}
+						/>
+						<FormField
+							control={form.control}
+							name="spotId"
+							render={({ field }) => (
+								<FormItem>
+									<FormLabel>Spot</FormLabel>
+									<FormControl>
+										<Select onValueChange={(v) => field.onChange(v)} value={field.value}>
+											<SelectTrigger className="w-full">
+												<SelectValue placeholder="Select a spot" />
+											</SelectTrigger>
+											<SelectContent>
+												{spots.length === 0 && (
+													<SelectItem value="__no_spots__" disabled>
+														No spots
+													</SelectItem>
+												)}
+												{spots.filter((s) => s.id).map((s) => (
+													<SelectItem key={s.id} value={s.id}>
+														{s.name || s.id}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
 									</FormControl>
 								</FormItem>
 							)}

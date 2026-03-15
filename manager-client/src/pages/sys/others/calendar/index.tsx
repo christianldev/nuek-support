@@ -14,6 +14,8 @@ import CalendarEvent from "./calendar-event";
 import CalendarEventForm, { type CalendarEventFormFieldType } from "./calendar-event-form";
 import CalendarHeader, { type HandleMoveArg, type ViewType } from "./calendar-header";
 import { INITIAL_EVENTS } from "./event-utils";
+import apiClient from "@/api/apiClient";
+import { toast } from "sonner";
 import { StyledCalendar } from "./styles";
 
 const DefaultEventInitValue = {
@@ -24,6 +26,7 @@ const DefaultEventInitValue = {
 	start: dayjs(),
 	end: dayjs(),
 	color: "",
+	spotId: "",
 };
 export default function Calendar() {
 	const fullCalendarRef = useRef<FullCalendar>(null);
@@ -89,6 +92,7 @@ export default function Calendar() {
 			description: "",
 			start: dayjs(selectInfo.startStr),
 			end: dayjs(selectInfo.endStr),
+			spotId: "",
 			allDay: selectInfo.allDay,
 		});
 	};
@@ -107,6 +111,7 @@ export default function Calendar() {
 			allDay,
 			color: backgroundColor,
 			description: extendedProps.description,
+			spotId: extendedProps.spotId,
 		};
 		if (start) {
 			newEventValue.start = dayjs(start);
@@ -122,55 +127,117 @@ export default function Calendar() {
 		setOpen(false);
 	};
 	// edit event
-	const handleEdit = (values: CalendarEventFormFieldType) => {
+	const handleEdit = async (values: CalendarEventFormFieldType) => {
 		const { id, title = "", description, start, end, allDay = false, color } = values;
 		const calendarApi = fullCalendarRef.current?.getApi();
 		if (!calendarApi) return;
-		const oldEvent = calendarApi.getEventById(id);
+		// Update reservation via PATCH to avoid delete+create
+		try {
+			const payload = {
+				spotId: (values as any).spotId || "",
+				start: start?.toDate().toISOString(),
+				end: end?.toDate().toISOString(),
+			};
 
-		const newEvent: EventInput = {
-			id,
-			title,
-			allDay,
-			color,
-			extendedProps: {
-				description,
-			},
-		};
-		if (start) newEvent.start = start.toDate();
-		if (end) newEvent.end = end.toDate();
+			// Local overlap check excluding the event being edited
+			const newStart = start?.toDate();
+			const newEnd = end?.toDate();
+			const spotId = (values as any).spotId || "";
+			if (!spotId) {
+				toast.error('Selecciona una plaza antes de actualizar la reserva.');
+				return;
+			}
+			const events = calendarApi.getEvents();
+			const hasOverlap = events.some((ev) => {
+				if (ev.id === id) return false;
+				const evSpot = (ev.extendedProps as any)?.spotId || "";
+				if (!evSpot || evSpot !== spotId) return false;
+				const evStart = ev.start;
+				const evEnd = ev.end || evStart;
+				if (!evStart || !newStart || !newEnd) return false;
+				return !( (evEnd <= newStart) || (evStart >= newEnd) );
+			});
+			if (hasOverlap) {
+				toast.error('La plaza ya está reservada en ese horario (validación local).');
+				return;
+			}
 
-		// 刷新日历显示
-		oldEvent?.remove();
-		calendarApi.addEvent(newEvent);
+			await apiClient.request({ url: `/parking/reservations/${id}`, method: "PATCH", data: payload });
+			toast.success("Reserva actualizada");
+			calendarApi.refetchEvents();
+		} catch (err: any) {
+			if (err?.response?.status === 409) {
+				toast.error("La plaza ya está reservada en ese horario.");
+			} else {
+				// apiClient interceptor will show a generic error, but ensure user sees something
+				toast.error(err?.response?.data?.message || "Error al actualizar la reserva");
+			}
+			console.error("Update reservation failed", err);
+		}
 	};
 	// create event
-	const handleCreate = (values: CalendarEventFormFieldType) => {
+	const handleCreate = async (values: CalendarEventFormFieldType) => {
 		const calendarApi = fullCalendarRef.current?.getApi();
 		if (!calendarApi) return;
-		const { title = "", description, start, end, allDay = false, color } = values;
-
-		const newEvent: EventInput = {
-			id: faker.string.uuid(),
-			title,
-			allDay,
-			color,
-			extendedProps: {
-				description,
-			},
+		const { start, end } = values;
+		const payload = {
+			id: values.id || faker.string.uuid(),
+			spotId: (values as any).spotId || "",
+			start: start?.toDate().toISOString(),
+			end: end?.toDate().toISOString(),
+			userId: null,
 		};
-		if (start) newEvent.start = start.toDate();
-		if (end) newEvent.end = end.toDate();
 
-		// 刷新日历显示
-		calendarApi.addEvent(newEvent);
+		// Local overlap check against events currently shown in calendar to provide fast feedback
+		const newStart = start?.toDate();
+		const newEnd = end?.toDate();
+		const spotId = (values as any).spotId || "";
+		if (!spotId) {
+			toast.error('Selecciona una plaza antes de crear la reserva.');
+			return;
+		}
+
+		const events = calendarApi.getEvents();
+		const hasOverlap = events.some((ev) => {
+			const evSpot = (ev.extendedProps as any)?.spotId || "";
+			if (!evSpot || evSpot !== spotId) return false;
+			const evStart = ev.start;
+			const evEnd = ev.end || evStart;
+			if (!evStart || !newStart || !newEnd) return false;
+			// overlap if NOT (existing.end <= newStart OR existing.start >= newEnd)
+			return !( (evEnd <= newStart) || (evStart >= newEnd) );
+		});
+
+		if (hasOverlap) {
+			toast.error('La plaza ya está reservada en ese horario (validación local).');
+			return;
+		}
+
+		try {
+			await apiClient.post({ url: '/parking/reservations', data: payload });
+			toast.success('Reserva creada');
+			calendarApi.refetchEvents();
+		} catch (err: any) {
+			if (err?.response?.status === 409) {
+				toast.error('La plaza ya está reservada en ese horario.');
+			} else {
+				toast.error(err?.response?.data?.message || 'Error al crear la reserva');
+			}
+			console.error('Create reservation failed', err);
+		}
 	};
 	// delete event
-	const handleDelete = (id: string) => {
+	const handleDelete = async (id: string) => {
 		const calendarApi = fullCalendarRef.current?.getApi();
 		if (!calendarApi) return;
-		const oldEvent = calendarApi.getEventById(id);
-		oldEvent?.remove();
+		try {
+			await apiClient.delete({ url: `/parking/reservations/${id}` });
+			toast.success('Reserva eliminada');
+			calendarApi.refetchEvents();
+		} catch (err: any) {
+			toast.error(err?.response?.data?.message || 'Error al eliminar la reserva');
+			console.error('Delete reservation failed', err);
+		}
 	};
 
 	return (
@@ -190,7 +257,6 @@ export default function Calendar() {
 							plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, listPlugin]}
 							initialDate={date}
 							initialView={xsBreakPoint ? "listWeek" : view}
-							events={INITIAL_EVENTS}
 							eventContent={CalendarEvent}
 							editable
 							selectable
@@ -199,6 +265,22 @@ export default function Calendar() {
 							headerToolbar={false}
 							select={handleDateSelect}
 							eventClick={handleEventClick}
+							events={(info, successCallback, failureCallback) => {
+								apiClient
+									.get({ url: '/parking/reservations', params: { start: info.startStr, end: info.endStr } })
+									.then((res: any) => {
+										const events = (res as any[]).map((r: any) => ({
+											id: r.id,
+											title: `Spot ${r.spotId}`,
+											start: r.start,
+											end: r.end,
+											color: '#00a76f',
+											extendedProps: { spotId: r.spotId },
+										}));
+										successCallback(events);
+									})
+									.catch((e) => failureCallback(e));
+								}}
 						/>
 					</StyledCalendar>
 				</CardContent>

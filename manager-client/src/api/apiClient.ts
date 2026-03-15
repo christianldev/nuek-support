@@ -10,6 +10,7 @@ const axiosInstance = axios.create({
 	baseURL: GLOBAL_CONFIG.apiBaseUrl,
 	timeout: 50000,
 	headers: { "Content-Type": "application/json;charset=utf-8" },
+	withCredentials: true,
 });
 
 axiosInstance.interceptors.request.use(
