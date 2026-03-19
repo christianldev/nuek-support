@@ -19,6 +19,12 @@ export class ParkingController {
     return { status: 0, data };
   }
 
+  @Post('validate-plate')
+  async validatePlate(@Body() body: { licensePlate: string }) {
+    const valid = await this.service.validateLicensePlateWithSRI(body.licensePlate);
+    return { status: 0, data: { valid } };
+  }
+
   @Delete('reservations/:id')
   async remove(@Param('id') id: string) {
     const data = await this.service.deleteReservation(id);

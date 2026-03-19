@@ -5,4 +5,5 @@ export class CreateReservationDto {
   start!: string; // ISO string
   end!: string; // ISO string
   status?: string;
+  licensePlate!: string; // License plate for SRI validation
 }

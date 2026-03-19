@@ -2,7 +2,7 @@ import { down, useMediaQuery } from "@/hooks";
 import { useSettings } from "@/store/settingStore";
 import { Card, CardContent } from "@/ui/card";
 import { faker } from "@faker-js/faker";
-import type { DateSelectArg, EventClickArg, EventInput } from "@fullcalendar/core";
+import type { DateSelectArg, EventClickArg } from "@fullcalendar/core";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import listPlugin from "@fullcalendar/list";
@@ -13,7 +13,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import CalendarEvent from "./calendar-event";
 import CalendarEventForm, { type CalendarEventFormFieldType } from "./calendar-event-form";
 import CalendarHeader, { type HandleMoveArg, type ViewType } from "./calendar-header";
-import { INITIAL_EVENTS } from "./event-utils";
 import apiClient from "@/api/apiClient";
 import { toast } from "sonner";
 import { StyledCalendar } from "./styles";
@@ -22,6 +21,7 @@ const DefaultEventInitValue = {
 	id: faker.string.uuid(),
 	title: "",
 	description: "",
+	licensePlate: "",
 	allDay: false,
 	start: dayjs(),
 	end: dayjs(),
@@ -90,6 +90,7 @@ export default function Calendar() {
 			id: faker.string.uuid(),
 			title: "",
 			description: "",
+			licensePlate: "",
 			start: dayjs(selectInfo.startStr),
 			end: dayjs(selectInfo.endStr),
 			spotId: "",
@@ -111,6 +112,7 @@ export default function Calendar() {
 			allDay,
 			color: backgroundColor,
 			description: extendedProps.description,
+			licensePlate: extendedProps.licensePlate || "",
 			spotId: extendedProps.spotId,
 		};
 		if (start) {
@@ -128,12 +130,13 @@ export default function Calendar() {
 	};
 	// edit event
 	const handleEdit = async (values: CalendarEventFormFieldType) => {
-		const { id, title = "", description, start, end, allDay = false, color } = values;
+		const { id, start, end } = values;
 		const calendarApi = fullCalendarRef.current?.getApi();
 		if (!calendarApi) return;
 		// Update reservation via PATCH to avoid delete+create
 		try {
 			const payload = {
+				licensePlate: (values as any).licensePlate || "",
 				spotId: (values as any).spotId || "",
 				start: start?.toDate().toISOString(),
 				end: end?.toDate().toISOString(),
@@ -143,8 +146,13 @@ export default function Calendar() {
 			const newStart = start?.toDate();
 			const newEnd = end?.toDate();
 			const spotId = (values as any).spotId || "";
+			const licensePlate = ((values as any).licensePlate || "").trim();
 			if (!spotId) {
 				toast.error('Selecciona una plaza antes de actualizar la reserva.');
+				return;
+			}
+			if (!licensePlate) {
+				toast.error('Ingresa la placa antes de actualizar la reserva.');
 				return;
 			}
 			const events = calendarApi.getEvents();
@@ -153,8 +161,8 @@ export default function Calendar() {
 				const evSpot = (ev.extendedProps as any)?.spotId || "";
 				if (!evSpot || evSpot !== spotId) return false;
 				const evStart = ev.start;
-				const evEnd = ev.end || evStart;
 				if (!evStart || !newStart || !newEnd) return false;
+				const evEnd = ev.end || evStart;
 				return !( (evEnd <= newStart) || (evStart >= newEnd) );
 			});
 			if (hasOverlap) {
@@ -164,6 +172,7 @@ export default function Calendar() {
 
 			await apiClient.request({ url: `/parking/reservations/${id}`, method: "PATCH", data: payload });
 			toast.success("Reserva actualizada");
+			handleCancel();
 			calendarApi.refetchEvents();
 		} catch (err: any) {
 			if (err?.response?.status === 409) {
@@ -182,6 +191,7 @@ export default function Calendar() {
 		const { start, end } = values;
 		const payload = {
 			id: values.id || faker.string.uuid(),
+			licensePlate: (values as any).licensePlate || "",
 			spotId: (values as any).spotId || "",
 			start: start?.toDate().toISOString(),
 			end: end?.toDate().toISOString(),
@@ -192,8 +202,13 @@ export default function Calendar() {
 		const newStart = start?.toDate();
 		const newEnd = end?.toDate();
 		const spotId = (values as any).spotId || "";
+		const licensePlate = ((values as any).licensePlate || "").trim();
 		if (!spotId) {
 			toast.error('Selecciona una plaza antes de crear la reserva.');
+			return;
+		}
+		if (!licensePlate) {
+			toast.error('Ingresa la placa antes de crear la reserva.');
 			return;
 		}
 
@@ -202,8 +217,8 @@ export default function Calendar() {
 			const evSpot = (ev.extendedProps as any)?.spotId || "";
 			if (!evSpot || evSpot !== spotId) return false;
 			const evStart = ev.start;
-			const evEnd = ev.end || evStart;
 			if (!evStart || !newStart || !newEnd) return false;
+			const evEnd = ev.end || evStart;
 			// overlap if NOT (existing.end <= newStart OR existing.start >= newEnd)
 			return !( (evEnd <= newStart) || (evStart >= newEnd) );
 		});
@@ -216,6 +231,7 @@ export default function Calendar() {
 		try {
 			await apiClient.post({ url: '/parking/reservations', data: payload });
 			toast.success('Reserva creada');
+			handleCancel();
 			calendarApi.refetchEvents();
 		} catch (err: any) {
 			if (err?.response?.status === 409) {
@@ -275,7 +291,7 @@ export default function Calendar() {
 											start: r.start,
 											end: r.end,
 											color: '#00a76f',
-											extendedProps: { spotId: r.spotId },
+											extendedProps: { spotId: r.spotId, licensePlate: r.licensePlate },
 										}));
 										successCallback(events);
 									})

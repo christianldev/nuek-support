@@ -15,10 +15,12 @@ import type { Dayjs } from "dayjs";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { AlertCircle } from "lucide-react";
 
 export type CalendarEventFormFieldType = Pick<EventInput, "title" | "allDay" | "color"> & {
 	id: string;
 	description?: string;
+	licensePlate: string;
 	spotId?: string;
 	start?: Dayjs;
 	end?: Dayjs;
@@ -39,6 +41,7 @@ const COLORS = ["#00a76f", "#8e33ff", "#00b8d9", "#003768", "#22c55e", "#ffab00"
 const formSchema = z.object({
 	title: z.string().min(1, "Title is required"),
 	description: z.string().optional(),
+	licensePlate: z.string().min(1, "License plate is required"),
 	spotId: z.string().min(1, "Spot ID is required"),
 	allDay: z.boolean(),
 	start: z.date(),
@@ -52,7 +55,7 @@ export default function CalendarEventForm({
 	type,
 	open,
 	onCancel,
-	initValues = { id: faker.string.uuid() },
+	initValues = { id: faker.string.uuid(), licensePlate: "" },
 	onEdit,
 	onCreate,
 	onDelete,
@@ -61,8 +64,9 @@ export default function CalendarEventForm({
 	const form = useForm<FormValues>({
 		resolver: zodResolver(formSchema),
 		defaultValues: {
-			title: initValues.title || "",
+			title: initValues.title || (initValues.spotId ? `Spot ${initValues.spotId}` : ""),
 			description: initValues.description || "",
+			licensePlate: initValues.licensePlate || "",
 			spotId: initValues.spotId || "",
 			allDay: initValues.allDay || false,
 			start: initValues.start?.toDate() || new Date(),
@@ -72,18 +76,25 @@ export default function CalendarEventForm({
 	});
 
 	const [spots, setSpots] = useState<{ id: string; name?: string }[]>([]);
+	const [plateValidation, setPlateValidation] = useState<{
+		status: "idle" | "valid" | "invalid" | "error";
+		message: string;
+	}>({ status: "idle", message: "" });
+	const [isValidatingPlate, setIsValidatingPlate] = useState(false);
 
 	useEffect(() => {
 		if (open) {
 			form.reset({
-				title: initValues.title || "",
+				title: initValues.title || (initValues.spotId ? `Spot ${initValues.spotId}` : ""),
 				description: initValues.description || "",
+				licensePlate: initValues.licensePlate || "",
 				spotId: initValues.spotId || "",
 				allDay: initValues.allDay || false,
 				start: initValues.start?.toDate() || new Date(),
 				end: initValues.end?.toDate() || new Date(),
 				color: initValues.color || COLORS[0],
 			});
+			setPlateValidation({ status: "idle", message: "" });
 		}
 	}, [initValues, form, open]);
 
@@ -95,17 +106,67 @@ export default function CalendarEventForm({
 			.catch(() => setSpots([]));
 	}, [open]);
 
-	const handleSubmit = (values: FormValues) => {
+	const validatePlate = async (plate: string) => {
+		if (!plate || plate.length < 3) {
+			setPlateValidation({
+				status: "error",
+				message: "License plate must be at least 3 characters",
+			});
+			return false;
+		}
+
+		try {
+			setIsValidatingPlate(true);
+			setPlateValidation({ status: "idle", message: "" });
+
+			const response = await apiClient.post<{ valid: boolean }>({
+				url: "/parking/validate-plate",
+				data: { licensePlate: plate },
+			});
+
+			console.log("SRI validation response:", response);
+
+			if (response?.valid) {
+				setPlateValidation({
+					status: "valid",
+					message: `✓ License plate ${plate} is valid`,
+				});
+				return true;
+			} else {
+				setPlateValidation({
+					status: "invalid",
+					message: `✗ Placa ingresada ${plate} no es válida`,
+				});
+				return false;
+			}
+		} catch (err: any) {
+			const errorMsg =
+				err.response?.data?.message || "Unable to validate license plate";
+			setPlateValidation({
+				status: "error",
+				message: errorMsg,
+			});
+			return false;
+		} finally {
+			setIsValidatingPlate(false);
+		}
+	};
+
+	const handleSubmit = async (values: FormValues) => {
+		const isValidPlate = await validatePlate(values.licensePlate);
+		if (!isValidPlate) return;
+
 		const { id } = initValues;
+		const normalizedTitle = values.spotId ? `Spot ${values.spotId}` : values.title;
 		const event: CalendarEventFormFieldType = {
 			...values,
+			title: normalizedTitle,
 			id,
 			start: dayjs(values.start),
 			end: dayjs(values.end),
 		};
 		if (type === "add") onCreate(event);
 		if (type === "edit") onEdit(event);
-		onCancel();
 	};
 
 	return (
@@ -121,9 +182,9 @@ export default function CalendarEventForm({
 							name="title"
 							render={({ field }) => (
 								<FormItem>
-									<FormLabel>Title</FormLabel>
+									<FormLabel>Title (auto por Spot)</FormLabel>
 									<FormControl>
-										<Input {...field} />
+										<Input {...field} readOnly />
 									</FormControl>
 								</FormItem>
 							)}
@@ -142,12 +203,53 @@ export default function CalendarEventForm({
 						/>
 						<FormField
 							control={form.control}
+							name="licensePlate"
+							render={({ field }) => (
+								<FormItem>
+									<FormLabel>License Plate <span className="text-red-500">*</span></FormLabel>
+									<FormControl>
+										<div className="flex gap-2">
+											<Input
+												{...field}
+												placeholder="e.g., GTW8118"
+												className="uppercase"
+												maxLength={10}
+												autoComplete="off"
+												onChange={(e) => {
+													field.onChange(e.target.value.toUpperCase());
+													setPlateValidation({ status: "idle", message: "" });
+												}}
+											/>
+										</div>
+									</FormControl>
+									{plateValidation.message && (
+										<div
+											className={`flex items-center gap-2 text-sm p-2 rounded-md mt-2 ${
+												plateValidation.status === "invalid"
+													? "bg-red-50 text-red-700"
+													: "bg-yellow-50 text-yellow-700"
+											}`}
+										>
+											{(plateValidation.status === "invalid" || plateValidation.status === "error") && (
+												<AlertCircle className="w-4 h-4" />
+											)}
+											{plateValidation.message}
+										</div>
+									)}
+								</FormItem>
+							)}
+						/>
+						<FormField
+							control={form.control}
 							name="spotId"
 							render={({ field }) => (
 								<FormItem>
 									<FormLabel>Spot</FormLabel>
 									<FormControl>
-										<Select onValueChange={(v) => field.onChange(v)} value={field.value}>
+										<Select onValueChange={(v) => {
+											field.onChange(v);
+											form.setValue("title", `Spot ${v}`, { shouldDirty: true, shouldValidate: true });
+										}} value={field.value}>
 											<SelectTrigger className="w-full">
 												<SelectValue placeholder="Select a spot" />
 											</SelectTrigger>
@@ -255,7 +357,9 @@ export default function CalendarEventForm({
 								<Button variant="ghost" type="button" onClick={onCancel}>
 									Cancel
 								</Button>
-								<Button type="submit">Save</Button>
+								<Button type="submit" disabled={isValidatingPlate}>
+									{isValidatingPlate ? "Validando placa..." : "Save"}
+								</Button>
 							</div>
 						</DialogFooter>
 					</form>

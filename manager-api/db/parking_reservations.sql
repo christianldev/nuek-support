@@ -3,6 +3,7 @@ CREATE TABLE parking_reservations (
   id VARCHAR2(64) PRIMARY KEY,
   user_id VARCHAR2(200),
   spot_id VARCHAR2(100) NOT NULL,
+  license_plate VARCHAR2(20) NOT NULL,
   start_time TIMESTAMP NOT NULL,
   end_time TIMESTAMP NOT NULL,
   status VARCHAR2(20),

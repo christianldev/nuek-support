@@ -1,6 +1,7 @@
 import { Injectable, ConflictException, InternalServerErrorException, NotFoundException, BadRequestException } from '@nestjs/common';
 import type { Connection } from 'oracledb';
 import oracledb from 'oracledb';
+import axios from 'axios';
 import { OracleFactory } from '../database/oracle.factory';
 import type { CreateReservationDto } from './dto/create-reservation.dto';
 
@@ -20,6 +21,34 @@ export class ParkingService {
     return 0;
   }
 
+  // Validate license plate against SRI API
+  async validateLicensePlateWithSRI(licensePlate: string): Promise<boolean> {
+    if (!licensePlate || !String(licensePlate).trim()) {
+      throw new BadRequestException('License plate is required');
+    }
+
+    try {
+      const sriUrl = `https://srienlinea.sri.gob.ec/sri-matriculacion-vehicular-recaudacion-servicio-internet/rest/BaseVehiculo/existePorNumeroPlaca`;
+      const response = await axios.get(sriUrl, {
+        params: { numeroPlaca: String(licensePlate).trim().toUpperCase() },
+        timeout: 10000, // 10 second timeout
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      // SRI returns status 0 for valid plates
+      return response.data?.status === 0 || response.status === 200;
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      console.error(`Failed to validate license plate ${licensePlate} with SRI`, err);
+      throw new BadRequestException(
+        `Unable to validate license plate with SRI: ${msg}. Please try again.`
+      );
+    }
+  }
+
   async listReservations(start: string, end: string) {
     let conn: Connection | null = null;
     try {
@@ -31,7 +60,7 @@ export class ParkingService {
 
       conn = await this.oracleFactory.getConnection('support');
       const result = await conn.execute(
-        `SELECT id, user_id, spot_id, start_time, end_time, status, created_at
+        `SELECT id, user_id, spot_id, license_plate, start_time, end_time, status, created_at
          FROM parking_reservations
          WHERE start_time < :endTime AND end_time > :startTime`,
         { startTime: startDate, endTime: endDate },
@@ -43,6 +72,7 @@ export class ParkingService {
         id: r.ID,
         userId: r.USER_ID,
         spotId: r.SPOT_ID,
+        licensePlate: r.LICENSE_PLATE,
         start: r.START_TIME instanceof Date ? r.START_TIME.toISOString() : r.START_TIME,
         end: r.END_TIME instanceof Date ? r.END_TIME.toISOString() : r.END_TIME, 
         status: r.STATUS,
@@ -71,6 +101,14 @@ export class ParkingService {
   async createReservation(dto: CreateReservationDto) {
     let conn: Connection | null = null;
     try {
+      // Validate license plate with SRI API
+      const isValidPlate = await this.validateLicensePlateWithSRI(dto.licensePlate);
+      if (!isValidPlate) {
+        throw new BadRequestException(
+          `Placa ingresada ${dto.licensePlate} no es válida.`
+        );
+      }
+
       conn = await this.oracleFactory.getConnection('support');
       // check overlap for same spot
       const overlap = await conn.execute(
@@ -85,12 +123,13 @@ export class ParkingService {
       }
 
       await conn.execute(
-        `INSERT INTO parking_reservations (id, user_id, spot_id, start_time, end_time, status, created_at)
-         VALUES (:id, :userId, :spotId, :startTime, :endTime, :status, SYSTIMESTAMP)`,
+        `INSERT INTO parking_reservations (id, user_id, spot_id, license_plate, start_time, end_time, status, created_at)
+         VALUES (:id, :userId, :spotId, :licensePlate, :startTime, :endTime, :status, SYSTIMESTAMP)`,
         {
           id: dto.id,
           userId: dto.userId ?? null,
           spotId: dto.spotId,
+          licensePlate: dto.licensePlate?.trim().toUpperCase(),
           startTime: new Date(dto.start),
           endTime: new Date(dto.end),
           status: dto.status ?? 'active',
@@ -124,7 +163,7 @@ export class ParkingService {
     }
   }
 
-  async updateReservation(id: string, dto: { spotId?: string; start?: string; end?: string }) {
+  async updateReservation(id: string, dto: { spotId?: string; start?: string; end?: string; licensePlate?: string }) {
     let conn: Connection | null = null;
     try {
       conn = await this.oracleFactory.getConnection('support');
@@ -144,17 +183,32 @@ export class ParkingService {
       // overlap check excluding self
       const overlap = await conn.execute(
         `SELECT COUNT(1) FROM parking_reservations WHERE spot_id = :spotId AND id != :id
-         AND NOT (end_time <= NVL(:start, end_time) OR start_time >= NVL(:end, start_time))`,
-        { spotId: newSpotId, id, start: newStart, end: newEnd },
+         AND NOT (end_time <= NVL(:newStartTime, end_time) OR start_time >= NVL(:newEndTime, start_time))`,
+        { spotId: newSpotId, id, newStartTime: newStart, newEndTime: newEnd },
       );
       const cnt = this.extractCount(overlap);
       if (cnt > 0) throw new ConflictException('Parking spot already reserved for this time range');
 
+      if (dto.licensePlate !== undefined) {
+        const normalizedPlate = String(dto.licensePlate).trim().toUpperCase();
+        if (!normalizedPlate) {
+          throw new BadRequestException('License plate is required');
+        }
+        const isValidPlate = await this.validateLicensePlateWithSRI(normalizedPlate);
+        if (!isValidPlate) {
+          throw new BadRequestException(`Placa ingresada ${normalizedPlate} no es válida.`);
+        }
+      }
+
       const binds: any = { id };
       const sets: string[] = [];
       if (dto.spotId) { sets.push('spot_id = :spotId'); binds.spotId = dto.spotId; }
-      if (dto.start) { sets.push('start_time = :start'); binds.start = new Date(dto.start); }
-      if (dto.end) { sets.push('end_time = :end'); binds.end = new Date(dto.end); }
+      if (dto.licensePlate !== undefined) {
+        sets.push('license_plate = :licensePlate');
+        binds.licensePlate = String(dto.licensePlate).trim().toUpperCase();
+      }
+      if (dto.start) { sets.push('start_time = :startTime'); binds.startTime = new Date(dto.start); }
+      if (dto.end) { sets.push('end_time = :endTime'); binds.endTime = new Date(dto.end); }
 
       if (sets.length === 0) return { id };
 
